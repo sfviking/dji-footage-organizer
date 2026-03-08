@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 drone_search.py — Index and search your organized drone footage library.
 

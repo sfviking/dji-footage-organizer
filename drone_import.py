@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 drone_import.py — Copy and organize DJI Neo 2 footage.
 
