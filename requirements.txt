@@ -1,0 +1,11 @@
+# drone_import.py / drone_search.py dependencies
+#
+# Required: none — both scripts run on stdlib alone.
+#
+# Recommended (enables GPS → place name lookup):
+geopy>=2.3.0
+#
+# System tool (enables accurate date/GPS from video files):
+#   macOS:   brew install exiftool
+#   Ubuntu:  sudo apt install libimage-exiftool-perl
+#   Windows: https://exiftool.org  (add to PATH)
