@@ -263,11 +263,31 @@ def parse_srt_metadata(srt_path: Path) -> dict:
         except ValueError:
             pass
 
-    # DJI SRT: GPS(longitude, latitude, altitude)
+    # Format 1 — older DJI (Phantom, early Mavic):
+    #   GPS(longitude, latitude, altitude)
     gps = re.search(r"GPS\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)", content)
     if gps:
         meta["lon"] = float(gps.group(1))
         meta["lat"] = float(gps.group(2))
+
+    # Format 2 — DJI Neo / Mini 3+ / newer Fly app:
+    #   [latitude: 37.123456] [longitude: -122.456789]
+    if "lat" not in meta:
+        lat_m = re.search(r"\[latitude\s*:\s*([-\d.]+)\]", content, re.IGNORECASE)
+        lon_m = re.search(r"\[longitude\s*:\s*([-\d.]+)\]", content, re.IGNORECASE)
+        if lat_m and lon_m:
+            meta["lat"] = float(lat_m.group(1))
+            meta["lon"] = float(lon_m.group(1))
+
+    # Format 3 — some firmware versions use bare labels:
+    #   latitude : 37.123456
+    #   longitude : -122.456789
+    if "lat" not in meta:
+        lat_m = re.search(r"(?<!\w)latitude\s*:\s*([-\d.]+)", content, re.IGNORECASE)
+        lon_m = re.search(r"(?<!\w)longitude\s*:\s*([-\d.]+)", content, re.IGNORECASE)
+        if lat_m and lon_m:
+            meta["lat"] = float(lat_m.group(1))
+            meta["lon"] = float(lon_m.group(1))
 
     return meta
 
@@ -304,26 +324,53 @@ def get_metadata(path: Path) -> dict:
 
 # ── Geocoding ──────────────────────────────────────────────────────────────────
 
+_geo_cache: dict = {}   # (lat_r, lon_r) → result dict; avoids duplicate API calls
+_geocoder  = None       # reuse one instance + RateLimiter across all sessions
+
+
+def _get_geocoder():
+    global _geocoder
+    if _geocoder is None:
+        try:
+            from geopy.geocoders import Nominatim
+            from geopy.extra.rate_limiter import RateLimiter
+            geolocator = Nominatim(user_agent="drone_importer/1.0")
+            _geocoder  = RateLimiter(geolocator.reverse, min_delay_seconds=1.1)
+        except ImportError:
+            _geocoder = False   # geopy not installed
+    return _geocoder
+
+
 def reverse_geocode(lat: float, lon: float) -> dict:
     """Return address dict or {} if geopy isn't installed / request fails."""
-    try:
-        from geopy.geocoders import Nominatim
-        from geopy.exc import GeocoderTimedOut
-    except ImportError:
+    geocoder = _get_geocoder()
+    if not geocoder:
         return {}
+
+    # Round to ~100m grid to maximise cache hits between nearby sessions
+    key = (round(lat, 3), round(lon, 3))
+    if key in _geo_cache:
+        vprint(f"    [geo]      cache hit for {key}")
+        return _geo_cache[key]
+
     try:
-        geo = Nominatim(user_agent="drone_importer/1.0")
-        loc = geo.reverse((lat, lon), exactly_one=True, timeout=8)
+        loc = geocoder((lat, lon), exactly_one=True, timeout=10)
         if not loc:
+            _geo_cache[key] = {}
             return {}
         addr = loc.raw.get("address", {})
-        return {
+        result = {
             "city":    addr.get("city") or addr.get("town") or addr.get("village") or "",
             "state":   addr.get("state", ""),
             "country": addr.get("country", ""),
             "display": loc.address,
         }
-    except Exception:
+        _geo_cache[key] = result
+        return result
+    except Exception as e:
+        vprint(f"    [geo]      error: {e}")
+        print("  (reverse geocoding failed — check network)")
+        _geo_cache[key] = {}
         return {}
 
 
@@ -438,8 +485,6 @@ def import_session(
         state = geo.get("state", "")
         if geo:
             print(f"  Location: {geo.get('display', 'unknown')}")
-        else:
-            print("  (reverse geocoding failed — check network or install geopy)")
     else:
         print("\n  No GPS found in metadata.")
 
