@@ -57,6 +57,13 @@ DEFAULT_CONFIG: dict = {
 
 VIDEO_EXTS = {".mp4", ".mov"}
 
+VERBOSE = False  # set from --verbose flag in main()
+
+
+def vprint(*a, **kw) -> None:
+    if VERBOSE:
+        print(*a, **kw)
+
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 def load_config() -> dict:
@@ -198,11 +205,14 @@ def get_metadata_exiftool(path: Path) -> dict:
         "-Duration", "-ImageSize", str(path),
     ])
     if result.returncode != 0:
+        vprint(f"    [exiftool] error on {path.name}: {result.stderr.strip()}")
         return {}
     try:
         data = json.loads(result.stdout)[0]
     except (json.JSONDecodeError, IndexError):
         return {}
+    vprint(f"    [exiftool] {path.name}: " +
+           ", ".join(f"{k}={v}" for k, v in data.items() if k != "SourceFile" and v))
 
     meta = {}
 
@@ -265,6 +275,7 @@ def parse_srt_metadata(srt_path: Path) -> dict:
 def get_metadata(path: Path) -> dict:
     """Try exiftool → .SRT sidecar → file mtime."""
     meta = get_metadata_exiftool(path)
+    source = "exiftool" if meta else ""
 
     if "lat" not in meta:
         for ext in (".SRT", ".srt"):
@@ -274,12 +285,20 @@ def get_metadata(path: Path) -> dict:
                 for k, v in srt_meta.items():
                     if k not in meta:
                         meta[k] = v
+                if not source:
+                    source = f"SRT ({srt.name})"
+                vprint(f"    [SRT]      {srt.name}: date={srt_meta.get('date')}, "
+                       f"lat={srt_meta.get('lat')}, lon={srt_meta.get('lon')}")
                 break
 
     if "date" not in meta:
         meta["date"] = datetime.fromtimestamp(path.stat().st_mtime)
         meta["date_source"] = "mtime"
+        source = "mtime"
 
+    meta.setdefault("date_source", source or "exiftool")
+    vprint(f"    [meta]     {path.name}: date={meta.get('date')}, "
+           f"source={meta['date_source']}, GPS={'yes' if 'lat' in meta else 'no'}")
     return meta
 
 
@@ -349,9 +368,12 @@ def group_into_sessions(videos: list, meta_cache: dict) -> list:
     )
     sessions, current, prev_dt = [], [dated[0][1]], dated[0][0]
     for dt, v in dated[1:]:
-        if abs((dt - prev_dt).total_seconds()) <= 7200:
+        gap_min = abs((dt - prev_dt).total_seconds()) / 60
+        if gap_min <= 120:
             current.append(v)
+            vprint(f"    [group]    {v.name} → same session (gap {gap_min:.0f} min)")
         else:
+            vprint(f"    [group]    {v.name} → new session (gap {gap_min:.0f} min > 120)")
             sessions.append(current)
             current = [v]
         prev_dt = dt
@@ -490,6 +512,12 @@ def import_session(
         h        = quick_hash(src)
         tag      = "MOVE" if move else "COPY"
         print(f"\n  [{tag}] {src.name}  ({size / 1e6:.1f} MB)", end="", flush=True)
+        vprint(f"\n    hash={h}")
+        file_meta = meta_cache.get(str(src), {})
+        if file_meta.get("resolution"):
+            vprint(f"    resolution={file_meta['resolution']}")
+        if file_meta.get("duration_s"):
+            vprint(f"    duration={file_meta['duration_s']:.1f}s")
 
         if not dry_run:
             dup = is_duplicate(conn, h)
@@ -504,7 +532,6 @@ def import_session(
             else:
                 shutil.copy2(str(src), dest)
 
-            file_meta = meta_cache.get(str(src), {})
             conn.execute(
                 """INSERT OR IGNORE INTO files
                    (session_id, original_name, stored_path, file_size, quick_hash,
@@ -559,7 +586,11 @@ def main() -> None:
     p.add_argument("--subject",    metavar="WORD",  help="Skip subject prompt (e.g. --subject harbor)")
     p.add_argument("--one-session",action="store_true", help="Treat all found files as one session (skip auto-grouping)")
     p.add_argument("--set-dest",   metavar="DIR",   help="Set default library root and exit")
+    p.add_argument("--verbose", "-v", action="store_true", help="Show detailed metadata and transfer info")
     args = p.parse_args()
+
+    global VERBOSE
+    VERBOSE = args.verbose
 
     cfg  = load_config()
     conn = init_db()

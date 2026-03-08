@@ -36,6 +36,13 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 DB_FILE     = CONFIG_DIR / "library.db"
 VIDEO_EXTS  = {".mp4", ".mov"}
 
+VERBOSE = False
+
+
+def vprint(*a, **kw) -> None:
+    if VERBOSE:
+        print(*a, **kw)
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def load_config() -> dict:
@@ -88,8 +95,9 @@ def col(text: str, width: int) -> str:
 def cmd_list(args, cfg, conn) -> None:
     rows = conn.execute("""
         SELECT s.id, s.folder_name, s.shoot_date, s.location_code, s.subject,
-               COUNT(f.id)      AS file_count,
-               SUM(f.file_size) AS total_size,
+               s.location, s.latitude, s.longitude, s.imported_at,
+               COUNT(f.id)       AS file_count,
+               SUM(f.file_size)  AS total_size,
                SUM(f.duration_s) AS total_dur
         FROM sessions s
         LEFT JOIN files f ON f.session_id = s.id
@@ -113,6 +121,21 @@ def cmd_list(args, cfg, conn) -> None:
             f"{fmt_size(r['total_size']):>8}  "
             f"{fmt_dur(r['total_dur']):>9}"
         )
+        if VERBOSE:
+            if r['location']:
+                vprint(f"    Location:  {r['location']}")
+            if r['latitude'] is not None:
+                vprint(f"    GPS:       {r['latitude']:.5f}, {r['longitude']:.5f}")
+            vprint(f"    Imported:  {r['imported_at'][:19]}")
+            files = conn.execute(
+                "SELECT original_name, file_size, duration_s, resolution, quick_hash "
+                "FROM files WHERE session_id = ? ORDER BY original_name",
+                (r["id"],),
+            ).fetchall()
+            for f in files:
+                vprint(f"    {f['original_name']:<28}  {fmt_size(f['file_size']):>8}  "
+                       f"{fmt_dur(f['duration_s']):>8}  {f['resolution'] or '?':>10}  "
+                       f"hash={f['quick_hash'] or '?'}")
     print(f"\n{len(rows)} session(s) total.")
 
 
@@ -166,7 +189,8 @@ def cmd_search(args, cfg, conn) -> None:
         print(f"  Duration:  {fmt_dur(r['total_dur'])}")
 
         files = conn.execute(
-            "SELECT stored_path, file_size, duration_s FROM files WHERE session_id = ? ORDER BY stored_path",
+            "SELECT stored_path, file_size, duration_s, resolution, quick_hash "
+            "FROM files WHERE session_id = ? ORDER BY stored_path",
             (r["id"],),
         ).fetchall()
         if files:
@@ -174,6 +198,8 @@ def cmd_search(args, cfg, conn) -> None:
             for f in files:
                 name = Path(f["stored_path"]).name
                 print(f"    {name:<30}  {fmt_size(f['file_size']):>8}  {fmt_dur(f['duration_s']):>8}")
+                if VERBOSE:
+                    vprint(f"      resolution={f['resolution'] or '?'}  hash={f['quick_hash'] or '?'}")
 
     print(f"\n{len(rows)} session(s) found.")
 
@@ -253,7 +279,9 @@ def cmd_rebuild(args, cfg, conn) -> None:
             continue
         m = folder_re.match(folder.name)
         if not m:
+            vprint(f"  skip: {folder.name} (doesn't match naming pattern)")
             continue
+        vprint(f"  scan: {folder.name}")
 
         date_str, loc_code, subject = m.groups()
         try:
@@ -319,6 +347,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+    p.add_argument("--verbose", "-v", action="store_true", help="Show extra detail (GPS, hashes, per-file info)")
     sub = p.add_subparsers(dest="command")
 
     # list
@@ -346,6 +375,9 @@ def main() -> None:
     if not args.command:
         p.print_help()
         sys.exit(0)
+
+    global VERBOSE
+    VERBOSE = args.verbose
 
     cfg = load_config()
 
