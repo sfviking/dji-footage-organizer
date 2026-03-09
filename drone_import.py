@@ -347,8 +347,9 @@ def reverse_geocode(lat: float, lon: float) -> dict:
     if not geocoder:
         return {}
 
-    # Round to ~100m grid to maximise cache hits between nearby sessions
-    key = (round(lat, 3), round(lon, 3))
+    # Round to ~500m grid to maximise cache hits between nearby sessions
+    # 0.005 degrees ≈ 550m latitude, ~450m longitude at mid-latitudes
+    key = (round(lat * 200) / 200, round(lon * 200) / 200)
     if key in _geo_cache:
         vprint(f"    [geo]      cache hit for {key}")
         return _geo_cache[key]
