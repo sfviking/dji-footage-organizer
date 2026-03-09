@@ -647,6 +647,10 @@ def main() -> None:
         return
 
     if args.dest:
+        # Override for this run only — do NOT write back to cfg so that
+        # save_config() (triggered by new abbreviations) never persists a
+        # temporary --dest path as the permanent library root.
+        cfg = dict(cfg)
         cfg["library_root"] = str(Path(args.dest).expanduser())
 
     # Resolve source
