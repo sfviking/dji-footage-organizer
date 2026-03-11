@@ -38,8 +38,10 @@ DB_FILE     = CONFIG_DIR / "library.db"
 DEFAULT_CONFIG: dict = {
     "library_root": str(Path.home() / "Videos" / "Drone"),
     "move_by_default": False,
+    "default_location_code": "PAC",   # shown when GPS is absent or unrecognized
     # Add your own: "Old Saybrook": "OS", "Downtown Marina": "DM", etc.
     "location_abbreviations": {
+        "Pacifica":      "PAC",
         "New York City": "NYC",
         "Los Angeles":   "LA",
         "San Francisco": "SF",
@@ -387,7 +389,7 @@ def suggest_location_code(city: str, state: str, cfg: dict) -> str:
         return city[:3].upper()
     if state:
         return state[:2].upper()
-    return "XX"
+    return cfg.get("default_location_code", "XX")
 
 
 # ── File Discovery ─────────────────────────────────────────────────────────────
@@ -495,7 +497,7 @@ def import_session(
         location_code = forced_location.upper()
         print(f"  Location code: {location_code} (from --location flag)")
     else:
-        suggestion = suggest_location_code(city, state, cfg) if (city or state) else "XX"
+        suggestion = suggest_location_code(city, state, cfg) if (city or state) else cfg.get("default_location_code", "XX")
         location_code = prompt("  Location code (2–3 letters)", suggestion).upper()
         # Save new custom abbreviation if city is known and code is non-default
         if city and location_code and location_code != suggestion:
