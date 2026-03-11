@@ -8,7 +8,7 @@ Footage is organized into dated folders named `YYYYMMDD.LocationCode.Subject`:
 
 ```
 ~/Videos/Drone/
-├── 20240627.SF.harbor/
+├── 20240627.PAC.beach/
 │   ├── DJI_0001.MP4
 │   ├── DJI_0001.SRT
 │   ├── DJI_0002.MP4
@@ -19,8 +19,8 @@ Footage is organized into dated folders named `YYYYMMDD.LocationCode.Subject`:
 ```
 
 - **Date** — pulled from file metadata (exiftool → DJI SRT telemetry → file mtime)
-- **Location code** — 2–3 letters, auto-suggested from GPS reverse geocoding, or type your own (e.g. `OS` for Old Saybrook). Custom codes are saved and reused automatically.
-- **Subject** — what you filmed: `harbor`, `bridge`, `downtown`, etc.
+- **Location code** — 2–3 letters, auto-suggested from GPS reverse geocoding, or type your own (e.g. `PAC` for Pacifica). Custom codes are saved and reused automatically.
+- **Subject** — what you filmed: `beach`, `Baquiano Trail`, `downtown`, etc.
 
 Multiple clips shot within 2 hours are grouped as one session. Duplicate files are detected by content hash and skipped.
 
@@ -46,7 +46,7 @@ python drone_import.py                        # auto-detect connected DJI card
 python drone_import.py /Volumes/DJI_001       # explicit source path
 python drone_import.py /Volumes/DJI_001 --move          # move instead of copy
 python drone_import.py /path/to/files --dry-run         # preview without touching files
-python drone_import.py /path/to/files --location SF --subject harbor  # skip prompts
+python drone_import.py /path/to/files --location PAC --subject beach  # skip prompts
 ```
 
 On first run, set your library destination:
@@ -59,10 +59,10 @@ python drone_import.py --set-dest ~/Videos/Drone
 
 ```bash
 python drone_search.py list                         # all sessions, newest first
-python drone_search.py search harbor                # keyword search
-python drone_search.py search --date 2024-06        # by month
+python drone_search.py search crack                 # keyword search
+python drone_search.py search --date 2026-03        # by month
 python drone_search.py search --location SF         # by location code
-python drone_search.py search harbor --date 2024    # combine filters
+python drone_search.py search beach --date 2025     # combine filters
 python drone_search.py stats                        # totals and top locations
 python drone_search.py rebuild                      # re-index after manual folder changes
 python drone_search.py setup ~/Videos/Drone         # set library root
@@ -77,7 +77,7 @@ Settings are stored in `~/.drone_library/config.json`. The most useful thing to 
   "library_root": "/Users/you/Videos/Drone",
   "move_by_default": false,
   "location_abbreviations": {
-    "Old Saybrook": "OS",
+    "Pacifica": "PAC",
     "Downtown Marina": "DM",
     "San Francisco": "SF"
   }
