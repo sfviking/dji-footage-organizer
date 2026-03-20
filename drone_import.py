@@ -197,27 +197,9 @@ def _run(cmd: list) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def get_metadata_exiftool(path: Path) -> dict:
-    """Extract GPS, date, duration, resolution using exiftool (if installed)."""
-    if not shutil.which("exiftool"):
-        return {}
-    result = _run([
-        "exiftool", "-json", "-n",
-        "-CreateDate", "-DateTimeOriginal", "-GPSLatitude", "-GPSLongitude",
-        "-Duration", "-ImageSize", str(path),
-    ])
-    if result.returncode != 0:
-        vprint(f"    [exiftool] error on {path.name}: {result.stderr.strip()}")
-        return {}
-    try:
-        data = json.loads(result.stdout)[0]
-    except (json.JSONDecodeError, IndexError):
-        return {}
-    vprint(f"    [exiftool] {path.name}: " +
-           ", ".join(f"{k}={v}" for k, v in data.items() if k != "SourceFile" and v))
-
+def _parse_exiftool_entry(data: dict) -> dict:
+    """Extract date, GPS, duration, resolution from one exiftool JSON entry."""
     meta = {}
-
     for field in ("CreateDate", "DateTimeOriginal"):
         val = data.get(field, "")
         if val and val != "0000:00:00 00:00:00":
@@ -226,22 +208,48 @@ def get_metadata_exiftool(path: Path) -> dict:
                 break
             except ValueError:
                 pass
-
     lat = data.get("GPSLatitude")
     lon = data.get("GPSLongitude")
     if lat is not None and lon is not None:
         meta["lat"] = float(lat)
         meta["lon"] = float(lon)
-
     dur = data.get("Duration")
     if dur is not None:
         meta["duration_s"] = float(dur)
-
     size = data.get("ImageSize")
     if size:
         meta["resolution"] = str(size)
-
     return meta
+
+
+def get_all_metadata_exiftool(paths: list) -> dict:
+    """
+    Run exiftool once across all files and return {str(path): metadata_dict}.
+    One subprocess call instead of one per file — much faster for large imports.
+    """
+    if not shutil.which("exiftool") or not paths:
+        return {}
+    result = _run([
+        "exiftool", "-json", "-n",
+        "-CreateDate", "-DateTimeOriginal", "-GPSLatitude", "-GPSLongitude",
+        "-Duration", "-ImageSize",
+        *[str(p) for p in paths],
+    ])
+    if result.returncode != 0:
+        vprint(f"  [exiftool] batch error: {result.stderr.strip()}")
+        return {}
+    try:
+        items = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {}
+    out = {}
+    for item in items:
+        source = item.get("SourceFile", "")
+        meta = _parse_exiftool_entry(item)
+        vprint(f"    [exiftool] {Path(source).name}: " +
+               ", ".join(f"{k}={v}" for k, v in item.items() if k != "SourceFile" and v))
+        out[source] = meta
+    return out
 
 
 def parse_srt_metadata(srt_path: Path) -> dict:
@@ -294,9 +302,9 @@ def parse_srt_metadata(srt_path: Path) -> dict:
     return meta
 
 
-def get_metadata(path: Path) -> dict:
-    """Try exiftool → .SRT sidecar → file mtime."""
-    meta = get_metadata_exiftool(path)
+def get_metadata(path: Path, exiftool_data: Optional[dict] = None) -> dict:
+    """Try exiftool (pre-fetched) → .SRT sidecar → file mtime."""
+    meta = dict(exiftool_data) if exiftool_data is not None else {}
     source = "exiftool" if meta else ""
 
     if "lat" not in meta:
@@ -693,7 +701,8 @@ def main() -> None:
     if not shutil.which("exiftool"):
         print("  (tip: install exiftool for GPS and accurate dates — `brew install exiftool`)")
 
-    meta_cache = {str(v): get_metadata(v) for v in videos}
+    exiftool_batch = get_all_metadata_exiftool(videos)
+    meta_cache = {str(v): get_metadata(v, exiftool_batch.get(str(v))) for v in videos}
 
     sessions = [videos] if args.one_session else group_into_sessions(videos, meta_cache)
     print(f"Grouped into {len(sessions)} session(s).")
